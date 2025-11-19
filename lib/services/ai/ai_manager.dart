@@ -1,5 +1,6 @@
 import 'package:logging/logging.dart';
 import 'package:objectbox/objectbox.dart';
+import 'package:flutter_gemma/flutter_gemma.dart';
 import '../../entity/ai_preferences.dart';
 import '../../entity/transaction.dart';
 import '../../entity/category.dart';
@@ -86,6 +87,25 @@ class AIManager {
     }
   }
 
+  /// Map model variant string to ModelType enum
+  ModelType _getModelType(String variant) {
+    switch (variant.toLowerCase()) {
+      case 'gemma-3-nano-270m':
+      case 'gemma-3-nano-270m-q4':
+        return ModelType.gemma3Nano270M;
+      case 'gemma-3-nano-1b':
+      case 'gemma-3-nano-1b-q4':
+        return ModelType.gemma3Nano1B;
+      case 'gemma-3-nano-2b':
+      case 'gemma-3-nano-2b-q4':
+        return ModelType.gemma3Nano2B;
+      case 'gemma-2b':
+        return ModelType.gemma2B;
+      default:
+        return ModelType.gemma3Nano270M; // Safe default
+    }
+  }
+
   /// Initialize AI services
   Future<void> _initializeAIServices() async {
     try {
@@ -95,9 +115,7 @@ class AIManager {
 
       if (_preferences!.modelDownloaded) {
         await gemmaService.loadModel(
-          modelName: _preferences!.modelVariant,
           maxTokens: _preferences!.maxTokens,
-          temperature: _preferences!.temperature,
         );
       }
 
@@ -159,10 +177,12 @@ class AIManager {
 
     // If model settings changed, reload model
     if (_preferences!.aiEnabled && _preferences!.modelDownloaded) {
+      // Unload current model if loaded
+      await gemmaService.unloadModel();
+
+      // Load with new settings
       await gemmaService.loadModel(
-        modelName: _preferences!.modelVariant,
         maxTokens: _preferences!.maxTokens,
-        temperature: _preferences!.temperature,
       );
     }
   }
@@ -180,23 +200,28 @@ class AIManager {
     }
   }
 
-  /// Download and initialize model
+  /// Download and install model
+  /// This is a one-time operation that downloads model files
   Future<void> downloadModel({
     String? modelVariant,
-    Function(double)? onProgress,
+    Function(int)? onProgress,
   }) async {
     try {
       final variant = modelVariant ?? _preferences?.modelVariant ?? 'gemma-3-nano-270m-q4';
+      final modelType = _getModelType(variant);
 
-      _log.info('Downloading model: $variant');
+      _log.info('Downloading model: $variant (ModelType: $modelType)');
 
       // Initialize Gemma service if not already done
       if (!gemmaService.isInitialized) {
         await gemmaService.initialize();
       }
 
-      // Load the model (flutter_gemma handles downloading internally)
-      await gemmaService.loadModel(modelName: variant);
+      // Install the model (downloads model files)
+      await gemmaService.installModel(
+        modelType: modelType,
+        onProgress: onProgress,
+      );
 
       // Update preferences
       if (_preferences != null) {
@@ -207,9 +232,30 @@ class AIManager {
         await _savePreferences();
       }
 
-      _log.info('Model downloaded and loaded successfully');
+      _log.info('Model downloaded successfully');
     } catch (e, stackTrace) {
       _log.severe('Failed to download model', e, stackTrace);
+      rethrow;
+    }
+  }
+
+  /// Load model into memory for inference
+  /// Call this after downloadModel() or on app startup
+  Future<void> loadModelForInference() async {
+    if (!_preferences!.modelDownloaded) {
+      throw Exception('Model not downloaded. Call downloadModel() first.');
+    }
+
+    try {
+      _log.info('Loading model for inference');
+
+      await gemmaService.loadModel(
+        maxTokens: _preferences!.maxTokens,
+      );
+
+      _log.info('Model loaded and ready for inference');
+    } catch (e, stackTrace) {
+      _log.severe('Failed to load model', e, stackTrace);
       rethrow;
     }
   }

@@ -129,7 +129,7 @@ Output:''';
         amount: amount.abs(),
         currency: currency,
         description: description,
-        merchant: merchant?.isEmpty ?? true ? null : merchant,
+        merchant: (merchant == null || merchant.isEmpty) ? null : merchant,
         date: date,
         type: type,
         isExpense: amount < 0,

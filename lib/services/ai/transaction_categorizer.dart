@@ -199,17 +199,21 @@ Category:''';
         final reason = parts[2].trim();
 
         // Find matching category
-        final category = availableCategories.firstWhere(
-          (cat) => cat.name.toLowerCase() == categoryName.toLowerCase(),
-          orElse: () => availableCategories.first,
-        );
+        try {
+          final category = availableCategories.firstWhere(
+            (cat) => cat.name.toLowerCase() == categoryName.toLowerCase(),
+          );
 
-        suggestions.add(CategorySuggestion(
-          categoryName: category.name,
-          categoryId: category.id,
-          confidence: confidence / 100.0,
-          reason: reason,
-        ));
+          suggestions.add(CategorySuggestion(
+            categoryName: category.name,
+            categoryId: category.id,
+            confidence: confidence / 100.0,
+            reason: reason,
+          ));
+        } catch (e) {
+          // Category not found - skip this suggestion
+          _log.fine('Category not found: $categoryName');
+        }
       }
     }
 

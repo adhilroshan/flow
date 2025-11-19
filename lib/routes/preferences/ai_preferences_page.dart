@@ -1,3 +1,4 @@
+import "dart:async";
 import "package:flow/l10n/extensions.dart";
 import "package:flow/entity/ai_preferences.dart";
 import "package:flow/services/ai/ai_manager.dart";
@@ -20,20 +21,35 @@ class _AIPreferencesPageState extends State<AIPreferencesPage> {
   bool _downloading = false;
   double _downloadProgress = 0.0;
 
+  StreamSubscription<double>? _progressSubscription;
+  StreamSubscription<String>? _statusSubscription;
+
   AIPreferences? get _prefs => _aiManager.preferences;
 
   @override
   void initState() {
     super.initState();
 
-    // Listen to download progress
-    _aiManager.gemmaService.downloadProgress.listen((progress) {
-      if (mounted) {
-        setState(() {
-          _downloadProgress = progress;
-        });
-      }
-    });
+    // Listen to download progress with error handling
+    _progressSubscription = _aiManager.gemmaService.downloadProgress.listen(
+      (progress) {
+        if (mounted) {
+          setState(() {
+            _downloadProgress = progress;
+          });
+        }
+      },
+      onError: (error) {
+        debugPrint('Download progress error: $error');
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _progressSubscription?.cancel();
+    _statusSubscription?.cancel();
+    super.dispose();
   }
 
   Future<void> _updatePreference(AIPreferences Function(AIPreferences) update) async {
@@ -109,16 +125,21 @@ class _AIPreferencesPageState extends State<AIPreferencesPage> {
     });
 
     try {
+      // Step 1: Download/install model
       await _aiManager.downloadModel(
         onProgress: (progress) {
           if (mounted) {
             setState(() {
-              _downloadProgress = progress;
+              _downloadProgress = progress / 100.0; // Convert 0-100 to 0.0-1.0
             });
           }
         },
       );
 
+      // Step 2: Load model into memory
+      await _aiManager.loadModelForInference();
+
+      // Step 3: Enable AI features
       await _aiManager.enableAI();
 
       if (mounted) {

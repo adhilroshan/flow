@@ -60,10 +60,11 @@ class SpendingInsightsService {
 
       for (final transaction in transactions) {
         // Check if amount is significantly higher than average
-        // final categoryAvg = averages[transaction.category?.name] ?? 0.0;
+        final categoryAvg = averages[transaction.category?.name] ?? 0.0;
+        final isHigherThanAverage = categoryAvg > 0 && transaction.amount.abs() > (categoryAvg * 2);
 
-        // Simplified anomaly detection - you can enhance this
-        if (transaction.amount > 500) {
+        // Detect anomalies: large transactions or those significantly above average
+        if (transaction.amount.abs() > 500 || isHigherThanAverage) {
           final prompt = '''Analyze this transaction for anomalies:
 Amount: \$${transaction.amount.toStringAsFixed(2)}
 Description: ${transaction.description ?? 'No description'}
@@ -107,9 +108,9 @@ Response:''';
     try {
       _log.info('Predicting spending for category: $category');
 
-      final categoryTransactions = historicalTransactions;
-      // .where((t) => t.category?.name == category)
-      // .toList();
+      final categoryTransactions = historicalTransactions
+          .where((t) => t.category?.name == category)
+          .toList();
 
       if (categoryTransactions.isEmpty) {
         return null;
