@@ -183,12 +183,6 @@ class AIPreferences implements EntityBase {
           smartSearchEnabled ||
           anomalyDetectionEnabled);
 
-  /// Increment AI operations counter
-  void incrementOperations() {
-    totalAIOperations++;
-    lastModelUsage = DateTime.now();
-  }
-
   @override
   String toString() => 'AIPreferences(aiEnabled: $aiEnabled, model: $modelVariant)';
 }

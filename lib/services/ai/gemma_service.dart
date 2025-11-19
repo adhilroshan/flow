@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_gemma/flutter_gemma.dart';
-import 'package:path_provider/path_provider.dart';
 import 'package:logging/logging.dart';
 
 /// Core service for managing Gemma AI model
@@ -13,11 +11,11 @@ class GemmaService {
   GemmaService._internal();
 
   final _log = Logger('GemmaService');
-  final _gemma = FlutterGemma();
 
   bool _isInitialized = false;
-  bool _isModelLoaded = false;
-  String? _modelPath;
+  bool _isModelInstalled = false;
+  GemmaModel? _model;
+  GemmaChat? _chat;
 
   final StreamController<double> _downloadProgressController =
       StreamController<double>.broadcast();
@@ -28,7 +26,7 @@ class GemmaService {
   Stream<String> get status => _statusController.stream;
 
   bool get isInitialized => _isInitialized;
-  bool get isModelLoaded => _isModelLoaded;
+  bool get isModelLoaded => _model != null && _chat != null;
 
   /// Initialize the Gemma service
   Future<void> initialize() async {
@@ -38,13 +36,11 @@ class GemmaService {
       _updateStatus('Initializing Gemma service...');
       _log.info('Initializing Gemma service');
 
-      // Get the models directory
-      final directory = await getApplicationDocumentsDirectory();
-      final modelsDir = Directory('${directory.path}/gemma_models');
-
-      if (!await modelsDir.exists()) {
-        await modelsDir.create(recursive: true);
-      }
+      // Initialize FlutterGemma with optional settings
+      await FlutterGemma.initialize(
+        maxDownloadRetries: 3,
+        enableWebCache: false, // Not needed for mobile
+      );
 
       _isInitialized = true;
       _updateStatus('Gemma service initialized');
@@ -56,36 +52,79 @@ class GemmaService {
     }
   }
 
-  /// Load the Gemma model
-  /// Uses Gemma 3 Nano 270M for optimal performance on mobile devices
-  Future<void> loadModel({
-    String modelName = 'gemma-3-nano-270m-q4',
-    int maxTokens = 512,
-    double temperature = 0.7,
-    int topK = 40,
+  /// Download and install the Gemma model
+  /// This is a one-time operation per model variant
+  Future<void> installModel({
+    ModelType modelType = ModelType.gemma3Nano270M,
+    Function(int)? onProgress,
   }) async {
     if (!_isInitialized) {
       await initialize();
     }
 
-    if (_isModelLoaded) {
+    if (_isModelInstalled) {
+      _log.info('Model already installed');
+      return;
+    }
+
+    try {
+      _updateStatus('Downloading model...');
+      _log.info('Installing Gemma model: $modelType');
+
+      // Install model from Hugging Face
+      // Note: For production, you may need to host models yourself
+      // or handle the Hugging Face token securely
+      await FlutterGemma.installModel(modelType: modelType)
+          .fromHuggingFace()
+          .withProgress((progress) {
+        _log.fine('Download progress: $progress%');
+        _updateProgress(progress / 100.0);
+        onProgress?.call(progress);
+      }).install();
+
+      _isModelInstalled = true;
+      _updateStatus('Model installed successfully');
+      _log.info('Model installed successfully');
+    } catch (e, stackTrace) {
+      _log.severe('Failed to install model', e, stackTrace);
+      _updateStatus('Failed to install model: $e');
+      rethrow;
+    }
+  }
+
+  /// Load the Gemma model for inference
+  Future<void> loadModel({
+    int maxTokens = 512,
+    PreferredBackend backend = PreferredBackend.auto,
+  }) async {
+    if (!_isInitialized) {
+      await initialize();
+    }
+
+    if (!_isModelInstalled) {
+      throw Exception(
+        'Model not installed. Call installModel() first.',
+      );
+    }
+
+    if (_model != null) {
       _log.info('Model already loaded');
       return;
     }
 
     try {
-      _updateStatus('Loading model: $modelName...');
-      _log.info('Loading Gemma model: $modelName');
+      _updateStatus('Loading model...');
+      _log.info('Loading Gemma model');
 
-      // Initialize the model with parameters
-      await _gemma.init(
+      // Get the active model instance
+      _model = await FlutterGemma.getActiveModel(
         maxTokens: maxTokens,
-        temperature: temperature,
-        topK: topK,
-        randomSeed: DateTime.now().millisecondsSinceEpoch,
+        preferredBackend: backend,
       );
 
-      _isModelLoaded = true;
+      // Create a chat session
+      _chat = await _model!.createChat();
+
       _updateStatus('Model loaded successfully');
       _log.info('Model loaded successfully');
     } catch (e, stackTrace) {
@@ -96,22 +135,34 @@ class GemmaService {
   }
 
   /// Generate text using the Gemma model
-  Future<String> generateText(
-    String prompt, {
-    int? maxTokens,
-    bool stream = false,
-  }) async {
-    if (!_isModelLoaded) {
+  Future<String> generateText(String prompt) async {
+    if (_chat == null) {
       throw Exception('Model not loaded. Call loadModel() first.');
     }
 
     try {
-      _log.info('Generating text for prompt: ${prompt.substring(0, prompt.length > 50 ? 50 : prompt.length)}...');
+      _log.info(
+        'Generating text for prompt: ${prompt.substring(0, prompt.length > 50 ? 50 : prompt.length)}...',
+      );
 
-      final response = await _gemma.generateContent(prompt);
+      // Add user query to chat
+      await _chat!.addQueryChunk(
+        Message.text(
+          text: prompt,
+          isUser: true,
+        ),
+      );
+
+      // Generate response
+      final response = await _chat!.generateChatResponse();
+
+      String result = '';
+      if (response is TextResponse) {
+        result = response.text ?? '';
+      }
 
       _log.info('Text generated successfully');
-      return response ?? '';
+      return result;
     } catch (e, stackTrace) {
       _log.severe('Failed to generate text', e, stackTrace);
       rethrow;
@@ -119,12 +170,37 @@ class GemmaService {
   }
 
   /// Generate text with streaming support
-  Stream<String> generateTextStream(String prompt) {
-    if (!_isModelLoaded) {
+  Stream<String> generateTextStream(String prompt) async* {
+    if (_chat == null) {
       throw Exception('Model not loaded. Call loadModel() first.');
     }
 
-    return _gemma.generateContentStream(prompt);
+    try {
+      _log.info('Generating streamed text for prompt');
+
+      // Add user query to chat
+      await _chat!.addQueryChunk(
+        Message.text(
+          text: prompt,
+          isUser: true,
+        ),
+      );
+
+      // Stream response tokens
+      await for (final response in _chat!.generateChatResponseAsync()) {
+        if (response is TextResponse) {
+          final token = response.token ?? '';
+          if (token.isNotEmpty) {
+            yield token;
+          }
+        }
+      }
+
+      _log.info('Stream completed');
+    } catch (e, stackTrace) {
+      _log.severe('Failed to generate streamed text', e, stackTrace);
+      rethrow;
+    }
   }
 
   /// Generate a structured response for specific tasks
@@ -179,22 +255,41 @@ class GemmaService {
 
   /// Unload the model to free up memory
   Future<void> unloadModel() async {
-    if (!_isModelLoaded) return;
+    if (_chat == null && _model == null) return;
 
     try {
       _updateStatus('Unloading model...');
       _log.info('Unloading model');
 
-      // The flutter_gemma plugin doesn't have explicit unload,
-      // but we can mark it as unloaded
-      _isModelLoaded = false;
+      // Close chat session
+      if (_chat != null) {
+        await _chat!.close();
+        _chat = null;
+      }
+
+      // Close model
+      if (_model != null) {
+        await _model!.close();
+        _model = null;
+      }
 
       _updateStatus('Model unloaded');
       _log.info('Model unloaded successfully');
     } catch (e, stackTrace) {
       _log.severe('Failed to unload model', e, stackTrace);
       _updateStatus('Failed to unload model: $e');
-      rethrow;
+      // Don't rethrow - best effort cleanup
+    }
+  }
+
+  /// Check if model is installed
+  Future<bool> isModelInstalled(ModelType modelType) async {
+    try {
+      // Note: flutter_gemma doesn't have a direct check method
+      // This is a placeholder - you may need to track this in preferences
+      return _isModelInstalled;
+    } catch (e) {
+      return false;
     }
   }
 
@@ -213,8 +308,9 @@ class GemmaService {
   }
 
   /// Dispose resources
-  void dispose() {
-    _downloadProgressController.close();
-    _statusController.close();
+  Future<void> dispose() async {
+    await unloadModel();
+    await _downloadProgressController.close();
+    await _statusController.close();
   }
 }

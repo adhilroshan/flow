@@ -1,6 +1,7 @@
 import 'package:logging/logging.dart';
 import 'package:intl/intl.dart';
 import 'gemma_service.dart';
+import '../../entity/transaction/type.dart';
 
 /// AI-powered natural language transaction parser
 /// Converts natural language input into structured transaction data
@@ -220,9 +221,4 @@ class ParsedTransaction {
         'date: ${DateFormat('yyyy-MM-dd').format(date)}, '
         'type: $type)';
   }
-}
-
-enum TransactionType {
-  income,
-  expense,
 }

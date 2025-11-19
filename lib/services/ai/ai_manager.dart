@@ -234,7 +234,10 @@ class AIManager {
     }
 
     try {
-      _preferences?.incrementOperations();
+      _preferences = _preferences!.copyWith(
+        totalAIOperations: _preferences!.totalAIOperations + 1,
+        lastModelUsage: DateTime.now(),
+      );
       await _savePreferences();
 
       return await transactionCategorizer.suggestCategory(
@@ -256,7 +259,10 @@ class AIManager {
     }
 
     try {
-      _preferences?.incrementOperations();
+      _preferences = _preferences!.copyWith(
+        totalAIOperations: _preferences!.totalAIOperations + 1,
+        lastModelUsage: DateTime.now(),
+      );
       await _savePreferences();
 
       return await naturalLanguageParser.parseTransaction(input);
@@ -278,7 +284,10 @@ class AIManager {
     }
 
     try {
-      _preferences?.incrementOperations();
+      _preferences = _preferences!.copyWith(
+        totalAIOperations: _preferences!.totalAIOperations + 1,
+        lastModelUsage: DateTime.now(),
+      );
       await _savePreferences();
 
       return await spendingInsights.generateInsights(
@@ -300,7 +309,10 @@ class AIManager {
     }
 
     try {
-      _preferences?.incrementOperations();
+      _preferences = _preferences!.copyWith(
+        totalAIOperations: _preferences!.totalAIOperations + 1,
+        lastModelUsage: DateTime.now(),
+      );
       await _savePreferences();
 
       return await receiptParser.parseReceipt(imagePath);
@@ -325,7 +337,10 @@ class AIManager {
     }
 
     try {
-      _preferences?.incrementOperations();
+      _preferences = _preferences!.copyWith(
+        totalAIOperations: _preferences!.totalAIOperations + 1,
+        lastModelUsage: DateTime.now(),
+      );
       await _savePreferences();
 
       return await smartSearch.searchTransactions(
